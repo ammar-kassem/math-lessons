@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>نظام تسجيل الدروس</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Cairo', sans-serif; }
+    /* تبسيط الجدول للجوال */
+    @media (max-width: 640px) {
+      table thead { display: none; }
+      table, table tbody, table tr, table td { display: block; width: 100%; }
+      table tr { margin-bottom: 0.5rem; border-bottom: 1px solid #e0f2fe; padding-bottom: 0.25rem; }
+      table td { text-align: right; padding-left: 50%; position: relative; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+      table td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 0;
+        width: 45%;
+        font-weight: 600;
+        color: #0284c7;
+      }
+    }
+    table td, table th { padding: 0.5rem; }
+  </style>
+</head>
+<body class="bg-white min-h-screen flex flex-col items-center p-6">
+  <h1 class="text-3xl font-extrabold text-cyan-600 mb-6 drop-shadow-md">📘 نظام تسجيل الدروس</h1>
+
+  <!-- أزرار التصدير والاستيراد -->
+  <div class="flex flex-wrap gap-4 mb-6 w-full max-w-5xl">
+    <button onclick="downloadExcel()" class="bg-cyan-600 text-white px-6 py-2 rounded-xl shadow-lg hover:bg-cyan-700 transition font-semibold">
+      📥 تحميل Excel
+    </button>
+
+    <label class="bg-cyan-50 text-cyan-700 px-6 py-2 rounded-xl shadow-inner hover:bg-cyan-100 transition cursor-pointer font-semibold border border-cyan-200">
+      📤 رفع Excel
+      <input type="file" id="uploadExcel" accept=".xlsx,.xls" class="hidden" onchange="uploadExcelFile(event)">
+    </label>
+  </div>
+
+  <!-- الإحصائيات -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-6 w-full max-w-5xl">
+    <div class="bg-white shadow-xl rounded-3xl p-4 text-center border border-cyan-100 flex flex-col items-center">
+      <i class="fas fa-book-open text-cyan-500 text-2xl mb-1"></i>
+      <h2 class="text-lg font-semibold text-cyan-700 mb-1">إجمالي الدروس</h2>
+      <p id="totalLessons" class="text-2xl font-bold text-cyan-600">0</p>
+    </div>
+    <div class="bg-white shadow-xl rounded-3xl p-4 text-center border border-cyan-100 flex flex-col items-center">
+      <i class="fas fa-wallet text-cyan-500 text-2xl mb-1"></i>
+      <h2 class="text-lg font-semibold text-cyan-700 mb-1">مدفوعة</h2>
+      <p id="paidLessons" class="text-2xl font-bold text-cyan-500">0</p>
+    </div>
+    <div class="bg-white shadow-xl rounded-3xl p-4 text-center border border-cyan-100 flex flex-col items-center">
+      <i class="fas fa-hourglass-half text-cyan-500 text-2xl mb-1"></i>
+      <h2 class="text-lg font-semibold text-cyan-700 mb-1">غير مدفوعة</h2>
+      <p id="unpaidLessons" class="text-2xl font-bold text-cyan-400">0</p>
+    </div>
+    <div class="bg-white shadow-xl rounded-3xl p-4 text-center border border-cyan-100 flex flex-col items-center">
+      <i class="fas fa-money-bill-wave text-cyan-500 text-2xl mb-1"></i>
+      <h2 class="text-lg font-semibold text-cyan-700 mb-1">المبلغ الكلي</h2>
+      <p id="totalAmount" class="text-2xl font-bold text-cyan-600">0</p>
+    </div>
+  </div>
+
+  <!-- فورم إضافة درس -->
+  <form id="lessonForm" class="flex flex-wrap gap-4 mb-6 w-full max-w-5xl">
+    <input type="date" id="date" required class="p-2 border border-cyan-200 rounded-xl shadow-sm focus:ring-2 focus:ring-cyan-300 transition w-full sm:w-auto">
+    <input type="text" id="day" placeholder="اليوم" required class="p-2 border border-cyan-200 rounded-xl shadow-sm focus:ring-2 focus:ring-cyan-300 transition w-full sm:w-auto">
+    <input type="number" id="price" placeholder="سعر الدرس" required class="p-2 border border-cyan-200 rounded-xl shadow-sm focus:ring-2 focus:ring-cyan-300 transition w-full sm:w-auto">
+    <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded-xl shadow-lg hover:bg-cyan-700 transition font-semibold">إضافة درس</button>
+  </form>
+
+  <!-- الجدول -->
+  <div class="overflow-x-auto w-full max-w-5xl shadow-xl rounded-3xl border border-cyan-100 mb-8">
+    <table class="w-full text-center border-collapse">
+      <thead class="bg-cyan-600 text-white">
+        <tr>
+          <th>#</th>
+          <th>التاريخ</th>
+          <th>اليوم</th>
+          <th>الحضور</th>
+          <th>الدفع</th>
+          <th>السعر</th>
+          <th>الإجراءات</th>
+        </tr>
+      </thead>
+      <tbody id="lessonsTable" class="bg-white"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let lessons = JSON.parse(localStorage.getItem("lessons")) || [];
+
+    function updateStats() {
+      const total = lessons.length;
+      const paid = lessons.filter(l => l.paid).length;
+      const unpaid = total - paid;
+      const totalAmount = lessons.reduce((sum, l) => sum + (l.paid ? l.price : 0), 0);
+
+      document.getElementById("totalLessons").innerText = total;
+      document.getElementById("paidLessons").innerText = paid;
+      document.getElementById("unpaidLessons").innerText = unpaid;
+      document.getElementById("totalAmount").innerText = totalAmount + " ر.س";
+    }
+
+    function renderTable() {
+      const table = document.getElementById("lessonsTable");
+      table.innerHTML = "";
+      lessons.forEach((lesson, i) => {
+        const row = document.createElement("tr");
+        row.className = "border-b hover:bg-cyan-50 transition";
+        row.innerHTML = `
+          <td data-label="#">${i+1}</td>
+          <td data-label="التاريخ">${lesson.date}</td>
+          <td data-label="اليوم">${lesson.day}</td>
+          <td data-label="الحضور"><input type="checkbox" ${lesson.attended ? "checked" : ""} onchange="toggleAttend(${i})" class="w-4 h-4 accent-cyan-600"></td>
+          <td data-label="الدفع"><input type="checkbox" ${lesson.paid ? "checked" : ""} onchange="togglePaid(${i})" class="w-4 h-4 accent-cyan-600"></td>
+          <td data-label="السعر">${lesson.price} ر.س</td>
+          <td data-label="الإجراءات">
+            <button onclick="editLesson(${i})" class="text-blue-600 hover:text-blue-800 mx-1"><i class="fas fa-edit"></i></button>
+            <button onclick="deleteLesson(${i})" class="text-red-600 hover:text-red-800 mx-1"><i class="fas fa-trash-alt"></i></button>
+          </td>
+        `;
+        table.appendChild(row);
+      });
+      updateStats();
+      localStorage.setItem("lessons", JSON.stringify(lessons));
+    }
+
+    function toggleAttend(index) { lessons[index].attended = !lessons[index].attended; renderTable(); }
+    function togglePaid(index) { lessons[index].paid = !lessons[index].paid; renderTable(); }
+
+    function deleteLesson(index) {
+      if(confirm("هل أنت متأكد من حذف هذا الدرس؟")) {
+        lessons.splice(index, 1);
+        renderTable();
+      }
+    }
+
+    function editLesson(index) {
+      const lesson = lessons[index];
+      const newDate = prompt("تعديل التاريخ:", lesson.date);
+      if(newDate !== null) lesson.date = newDate;
+      const newDay = prompt("تعديل اليوم:", lesson.day);
+      if(newDay !== null) lesson.day = newDay;
+      const newPrice = prompt("تعديل السعر:", lesson.price);
+      if(newPrice !== null) lesson.price = parseFloat(newPrice) || lesson.price;
+      renderTable();
+    }
+
+    document.getElementById("lessonForm").addEventListener("submit", function(e) {
+      e.preventDefault();
+      const date = document.getElementById("date").value;
+      const day = document.getElementById("day").value;
+      const price = parseFloat(document.getElementById("price").value);
+
+      lessons.push({ date, day, price, attended: true, paid: false });
+      renderTable();
+      this.reset();
+    });
+
+    function downloadExcel() {
+      const ws = XLSX.utils.json_to_sheet(lessons.map((l, i) => ({
+        "رقم الدرس": i+1,
+        "التاريخ": l.date,
+        "اليوم": l.day,
+        "الحضور": l.attended ? "✔" : "✘",
+        "الدفع": l.paid ? "✔" : "✘",
+        "السعر": l.price
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "الدروس");
+      XLSX.writeFile(wb, "lessons.xlsx");
+    }
+
+    function uploadExcelFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+
+        rows.forEach(r => {
+          lessons.push({
+            date: r["التاريخ"] || "",
+            day: r["اليوم"] || "",
+            price: parseFloat(r["السعر"]) || 0,
+            attended: r["الحضور"] === "✔",
+            paid: r["الدفع"] === "✔"
+          });
+        });
+        renderTable();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    renderTable();
+  </script>
+    
+  <!-- Signature -->
+  <p class="text-sm text-gray-500">
+    صنع بإتقان بواسطة
+    <a href="https://ammar-kassem.github.io/Portfolio-/" target="_blank" class="text-[#89CFF0] hover:underline font-semibold">@ Ammar Kassem</a>
+  </p>
+</body>
+  </html>
